@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="de">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Stickatelier · Anmelden</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/style.css"></head>
+<body class="loginPage">
+  <header><a class="brand" href="/" aria-label="Stickatelier Startseite"><span class="brandmark">S</span>Stickatelier<span class="brandtag">MOTIVWERKSTATT</span></a></header>
+  <main class="loginMain"><section class="loginCard" aria-labelledby="loginTitle">
+    <span class="eyebrow">EURE MOTIVWERKSTATT</span><h1 id="loginTitle">Willkommen im Stickatelier</h1>
+    <p>Melde dich mit eurem gemeinsamen Kennwort an, um Motive vorzubereiten und Projekte zu öffnen.</p>
+    <form id="loginForm"><label class="field" for="password">Kennwort<input id="password" name="password" type="password" autocomplete="current-password" minlength="8" maxlength="256" required autofocus></label>
+    <label class="check loginShow"><input id="showPassword" type="checkbox">Kennwort anzeigen</label>
+    <p id="loginError" class="colorError" role="alert" hidden></p><button id="loginButton" class="primary full" type="submit">Anmelden</button></form>
+    <p class="hint">Die Anmeldung gilt für diesen Browser bis zur Abmeldung oder für maximal zwölf Stunden.</p>
+  </section></main>
+  <script src="/login.js" defer></script>
+</body></html>
