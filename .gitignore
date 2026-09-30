@@ -1,0 +1,18 @@
+# Local image projects and OAuth registrations must stay out of Git.
+data/
+.env
+password.txt
+.env.*
+!.env.example
+*.pem
+*.key
+connection.json
+host.json
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.DS_Store
+Thumbs.db
+
