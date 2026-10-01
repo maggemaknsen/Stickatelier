@@ -19,19 +19,6 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'app'))
 from processing import png
 
-class LocalAnalysisFixture:
-    """No credentials and no OpenAI calls. Only used by the test server."""
-    def __init__(self):self.last=None
-    def status(self):return dict(connected=True,email='Lokaler UI-Test',plan_enabled=True)
-    def models(self):return [dict(id='local-test-model',name='Lokaler Test · simulierte Analyse')]
-    def suggest(self,original,model,current,mode,goal,prepared,stats):
-        from analysis import parse_analysis
-        self.last=dict(original=original,prepared=prepared,stats=stats,model=model)
-        return parse_analysis(json.dumps(dict(explanation='Simulierte Analyse für den lokalen Oberflächentest.',
-            findings=[dict(title='Testdaten: kleine Flächen',detail='Diese Beobachtung dient nur dem UI-Test.',severity='medium')],
-            warnings=['Testdaten, keine reale Motivanalyse.'],settings=dict(colors=2,smooth=0),
-            edit_prompt='Unwichtige Punkte vereinfachen und Schrift bewahren.')),current)
-
 class ServerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -41,7 +28,6 @@ class ServerTests(unittest.TestCase):
         with patch.dict(os.environ,ATELIER_DATA=cls.temp.name,ATELIER_PASSWORD_FILE=str(password_file),ATELIER_COOKIE_SECURE='false'):
             spec=importlib.util.spec_from_file_location('atelier_http_test_server',ROOT/'app/server.py')
             cls.module=importlib.util.module_from_spec(spec);spec.loader.exec_module(cls.module)
-        cls.module.AI=LocalAnalysisFixture()
         cls.http=cls.module.ThreadingHTTPServer(('127.0.0.1',0),cls.module.Handler)
         cls.thread=threading.Thread(target=cls.http.serve_forever,daemon=True);cls.thread.start()
         cls.base='http://127.0.0.1:'+str(cls.http.server_port)
@@ -51,7 +37,6 @@ class ServerTests(unittest.TestCase):
         cls.http.shutdown();cls.http.server_close();cls.thread.join();cls.temp.cleanup()
 
     def setUp(self):
-        self.module.AI.last=None
         self.client=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(CookieJar()))
         self.client.open(self.base).read()
         json.load(self.post('/auth/login',dict(password='local-test-password')))
@@ -65,12 +50,6 @@ class ServerTests(unittest.TestCase):
         ImageDraw.Draw(im).rectangle((80,0,159,79),fill='#ff0000')
         im.putpixel((0,0),(0,0,0,0))
         return json.load(self.post('/api/upload',png(im),{'X-Filename':'local-test.png'}))
-
-    def test_generate_handoff_works_without_project_or_ai(self):
-        result=json.load(self.post('/api/ai/handoff',dict(action='generate',goal='Ein Blatt',settings=dict(colors=3,width_mm=80))))
-        self.assertIsNone(result['image']);self.assertIsNone(result['source_id'])
-        self.assertIn('Höchstens 3',result['prompt']);self.assertIn('80 mm',result['prompt'])
-        self.assertIsNone(self.module.AI.last)
 
     def test_width_change_reaches_preview_and_export_and_out_of_range_is_rejected(self):
         p=self.source()
@@ -91,21 +70,7 @@ class ServerTests(unittest.TestCase):
                     self.post(route,dict(id=p['id'],settings=dict(width_mm=400)))
                 self.assertEqual(e.exception.code,400)
 
-    def test_reference_uses_current_palette_original_remains_available(self):
-        p=self.source()
-        chosen=dict(colors=2,width_mm=80,palette_edit=dict(base=['#ffffff','#ff0000'],map={'#ff0000':'#0000ff'}))
-        raw=dict(action='edit',id=p['id'],goal='Details vereinfachen',settings=chosen)
-        result=json.load(self.post('/api/ai/handoff',raw))
-        im=Image.open(BytesIO(base64.b64decode(result['image'].split(',')[1])))
-        self.assertEqual(im.getpixel((120,40)),(0,0,255,255))
-        self.assertIn('#0000FF',result['prompt'])
-        self.assertAlmostEqual(im.width/im.info['dpi'][0]*25.4,80,places=1)
-        raw['image_source']='original'
-        original=json.load(self.post('/api/ai/handoff',raw))
-        im=Image.open(BytesIO(base64.b64decode(original['image'].split(',')[1])))
-        self.assertEqual(im.getpixel((120,40)),(255,0,0,255))
-
-    def test_portrait_long_side_preview_export_analysis_and_both_reference_sources(self):
+    def test_portrait_long_side_preview_and_export(self):
         p=json.load(self.post('/api/upload',png(Image.new('RGBA',(100,200),'red')),{'X-Filename':'portrait-test.png'}))
         chosen=dict(long_side_mm=160)
         request=dict(id=p['id'],settings=chosen)
@@ -116,50 +81,61 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(exported['settings']['long_side_mm'],160)
             im=Image.open(BytesIO(package.read('motiv-vorbereitet.png')))
             self.assertAlmostEqual(im.height/im.info['dpi'][1]*25.4,160,delta=0.2)
-        analysis=json.load(self.post('/api/ai/suggest',{**request,'model':'local-test-model'}))
-        self.assertEqual(analysis['settings']['long_side_mm'],160)
-        self.assertEqual(analysis['settings']['width_mm'],80)
-        for source in ('original','prepared'):
-            result=json.load(self.post('/api/ai/handoff',{**request,'action':'edit','goal':'Vereinfachen','image_source':source}))
-            self.assertIn('lange Seite der gesamten Bildfläche: 160 mm',result['prompt'])
-            im=Image.open(BytesIO(base64.b64decode(result['image'].split(',')[1])))
-            self.assertAlmostEqual(im.height/im.info['dpi'][1]*25.4,160,delta=0.2)
-        for route in ('/api/preview','/api/export','/api/ai/handoff'):
+        for route in ('/api/preview','/api/export'):
             with self.subTest(route=route):
                 with self.assertRaises(urllib.error.HTTPError) as e:
-                    self.post(route,dict(id=p['id'],settings=dict(long_side_mm=400),action='edit',goal='x'))
+                    self.post(route,dict(id=p['id'],settings=dict(long_side_mm=400)))
                 self.assertEqual(e.exception.code,400)
 
     def test_import_is_new_project_and_parent_unchanged(self):
         p=self.source();before=self.client.open(self.base+'/api/original?id='+p['id']).read()
         variant=json.load(self.post('/api/upload',png(Image.new('RGBA',(90,60),'green')),
-                                   {'X-Filename':'returned.png','X-Atelier-Kind':'chatgpt-edit','X-Atelier-Source':p['id']}))
-        self.assertNotEqual(variant['id'],p['id']);self.assertEqual(variant['parent_id'],p['id'])
-        self.assertEqual(variant['kind'],'chatgpt-edit')
+                                   {'X-Filename':'returned.png'}))
+        self.assertNotEqual(variant['id'],p['id'])
+        # Preserve metadata of a variant created by an older version.
+        variant.update(parent_id=p['id'],kind='chatgpt-edit')
+        (self.module.project(variant['id'])/'meta.json').write_text(json.dumps(variant),encoding='utf-8')
         self.assertEqual(self.client.open(self.base+'/api/original?id='+p['id']).read(),before)
         stored=json.load(self.client.open(self.base+'/api/project?id='+variant['id']))
         self.assertEqual(stored,variant)
-        generated=json.load(self.post('/api/upload',png(Image.new('RGBA',(90,60),'blue')),{'X-Atelier-Kind':'chatgpt-generate'}))
+        generated=json.load(self.post('/api/upload',png(Image.new('RGBA',(90,60),'blue'))))
         self.assertNotIn('parent_id',generated)
 
-    def test_invalid_parent_or_handoff_rejected(self):
-        for path,body,headers in [('/api/upload',png(Image.new('RGBA',(20,20),'red')),{'X-Atelier-Kind':'chatgpt-edit','X-Atelier-Source':'../private'}),
-                                 ('/api/upload',png(Image.new('RGBA',(20,20),'red')),{'X-Atelier-Kind':'chatgpt-edit'}),
-                                 ('/api/ai/handoff',dict(action='edit',id='../private',goal='x'),{}),
-                                 ('/api/ai/handoff',dict(action='generate',goal='x'),{'Origin':'https://evil.example'})]:
-            with self.subTest(path=path,headers=headers):
-                with self.assertRaises(urllib.error.HTTPError) as e:self.post(path,body,headers)
-                self.assertIn(e.exception.code,(400,403))
+    def test_removed_workshop_routes_are_unavailable(self):
+        for path in ('/api/ai/status','/api/ai/models','/auth/callback?code=unused'):
+            with self.subTest(path=path):
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    self.client.open(self.base+path)
+                self.assertEqual(error.exception.code,404)
+        for path in ('/api/ai/handoff','/api/ai/connect','/api/ai/disconnect','/api/ai/suggest'):
+            with self.subTest(path=path):
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    self.post(path,{})
+                self.assertEqual(error.exception.code,404)
+        self.assertFalse(hasattr(self.module,'AI'))
+        self.assertFalse((Path(self.temp.name)/'private').exists())
+        page=self.client.open(self.base).read().decode()
+        for text in ('KI-Werkstatt','ChatGPT','aiWorkbench','accountDialog'):
+            self.assertNotIn(text,page)
+        self.assertNotIn('/api/ai/',self.client.open(self.base+'/app.js').read().decode())
 
-    def test_analysis_sees_original_prepared_palette_and_dimensions(self):
+    def test_palette_changes_reach_export_without_overwriting_original(self):
         p=self.source()
-        chosen=dict(colors=3,width_mm=80,palette_edit=dict(base=['#ffffff','#ff0000'],map={'#ff0000':'#0000ff'}))
-        result=json.load(self.post('/api/ai/suggest',dict(id=p['id'],settings=chosen,model='local-test-model',mode='logo')))
-        self.assertEqual(result['settings']['colors'],2);self.assertEqual(result['settings']['width_mm'],80)
-        self.assertEqual(result['findings'][0]['severity'],'medium')
-        recorded=self.module.AI.last
-        self.assertEqual(Image.open(BytesIO(recorded['original'])).getpixel((120,40)),(255,0,0,255))
-        self.assertEqual(Image.open(BytesIO(recorded['prepared'])).getpixel((120,40)),(0,0,255,255))
-        self.assertEqual(recorded['stats']['width_mm'],80)
+        before=self.client.open(self.base+'/api/original?id='+p['id']).read()
+        chosen=dict(colors=2,width_mm=80,palette_edit=dict(base=['#ffffff','#ff0000'],map={'#ff0000':'#0000ff'}))
+        request=dict(id=p['id'],settings=chosen)
+        json.load(self.post('/api/preview',request))
+        with zipfile.ZipFile(BytesIO(self.post('/api/export',request).read())) as package:
+            image=Image.open(BytesIO(package.read('motiv-vorbereitet.png')))
+            self.assertEqual(image.getpixel((120,40)),(0,0,255,255))
+        self.assertEqual(self.client.open(self.base+'/api/original?id='+p['id']).read(),before)
+
+    def test_cross_origin_and_invalid_project_rejected(self):
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.post('/api/demo',{}, {'Origin':'https://evil.example'})
+        self.assertEqual(error.exception.code,403)
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.post('/api/preview',dict(id='../private',settings={}))
+        self.assertEqual(error.exception.code,400)
 
 if __name__=='__main__':unittest.main()

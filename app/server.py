@@ -4,7 +4,6 @@ from io import BytesIO
 from pathlib import Path
 import base64
 import hashlib
-import html
 import json
 import os
 import re
@@ -13,9 +12,7 @@ import urllib.parse
 import uuid
 import zipfile
 from PIL import Image
-from processing import decode, prepare, png, demo, settings, physical_width
-from chatgpt import ChatGPT
-from handoff import handoff_request, make_prompt
+from processing import decode, prepare, png, demo, settings
 from auth import PasswordAuth
 
 ROOT = Path(__file__).parent
@@ -23,9 +20,7 @@ DATA = Path(os.environ.get('ATELIER_DATA', str(ROOT.parent/'data')))
 DATA.mkdir(parents=True, exist_ok=True)
 PROJECTS = DATA/'projects'
 PROJECTS.mkdir(exist_ok=True)
-AI = ChatGPT(DATA/'private')
 WORKERS = threading.BoundedSemaphore(2)
-AI_WORKER = threading.BoundedSemaphore(1)
 HOSTS = set(os.environ.get('ATELIER_HOSTS','127.0.0.1,localhost').split(','))
 AUTH = PasswordAuth.from_environment(ROOT.parent/'password.txt')
 
@@ -37,23 +32,19 @@ def project(identifier):
         raise ValueError('Projekt nicht gefunden. Bild erneut laden.')
     return path
 
-def create(image, name, parent_id=None, kind=None):
+def create(image, name):
     identifier = uuid.uuid4().hex
     directory = PROJECTS/identifier
     directory.mkdir()
     image.save(directory/'original.png')
     meta = dict(id=identifier, name=name[:120], width=image.width, height=image.height)
-    if kind:
-        meta['kind']=kind
-    if parent_id:
-        meta['parent_id']=parent_id
     (directory/'meta.json').write_text(json.dumps(meta),encoding='utf-8')
     return meta
 
 class Handler(BaseHTTPRequestHandler):
     server_version = 'Stickatelier/0.1'
     def log_message(self, *_):
-        # Do not log OAuth codes, credentials, filenames, or uploaded image data.
+        # Do not log credentials, filenames, or uploaded image data.
         pass
     def send(self, data, mime='application/json; charset=utf-8', status=200, extra=None):
         if isinstance(data,dict) or isinstance(data,list):
@@ -101,19 +92,6 @@ class Handler(BaseHTTPRequestHandler):
             args = urllib.parse.parse_qs(url.query)
             if url.path == '/api/health':
                 return self.send(dict(ok=True))
-            if url.path == '/auth/callback':
-                if self.server.server_port != 1455:
-                    raise ValueError('Falscher Callback-Port.')
-                if not self.session():
-                    return self.send('Bitte zuerst im Stickatelier anmelden und die ChatGPT-Verbindung erneut starten.', 'text/plain; charset=utf-8', status=401)
-                try:
-                    AI.callback(args,self.session())
-                    message = 'ChatGPT wurde verbunden. Du kannst dieses Fenster schließen und zum Stickatelier zurückkehren.'
-                except ValueError as exc:
-                    message = str(exc)
-                return self.send('<!doctype html><html lang="de"><meta charset="utf-8"><title>Stickatelier – Anmeldung</title><p>'+html.escape(message)+'</p></html>', 'text/html; charset=utf-8')
-            if self.server.server_port == 1455:
-                return self.send(dict(error='Nicht gefunden.'),status=404)
             if url.path in ('/style.css','/login.js','/favicon.svg') or (url.path in ('/','/login') and not self.session()):
                 login = url.path in ('/','/login')
                 name = 'login.html' if login else url.path[1:]
@@ -131,10 +109,6 @@ class Handler(BaseHTTPRequestHandler):
                 mime = {'index.html':'text/html; charset=utf-8','app.js':'text/javascript; charset=utf-8','color-tools.js':'text/javascript; charset=utf-8','style.css':'text/css; charset=utf-8','favicon.svg':'image/svg+xml'}[name]
                 extra = {}
                 return self.send((ROOT/'static'/name).read_bytes(),mime,extra=extra)
-            if url.path == '/api/ai/status':
-                return self.send(AI.status())
-            if url.path == '/api/ai/models':
-                return self.send(AI.models())
             if url.path == '/api/projects':
                 entries = sorted(PROJECTS.glob('*/meta.json'),key=lambda p:p.stat().st_mtime,reverse=True)[:30]
                 return self.send([json.loads(p.read_text(encoding='utf-8')) for p in entries])
@@ -151,7 +125,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send(dict(error='Die Anfrage konnte nicht verarbeitet werden.'),status=500)
     def do_POST(self):
         try:
-            if self.server.server_port == 1455 or not self.host_ok() or self.headers.get('X-Atelier') != '1':
+            if not self.host_ok() or self.headers.get('X-Atelier') != '1':
                 return self.send(dict(error='Anfrage nicht erlaubt.'),status=403)
             origin = self.headers.get('Origin')
             if origin and urllib.parse.urlsplit(origin).netloc != self.headers.get('Host'):
@@ -177,64 +151,18 @@ class Handler(BaseHTTPRequestHandler):
                 AUTH.logout(self.session())
                 return self.send(dict(ok=True),extra={'Set-Cookie':AUTH.cookie('')})
             if route == '/api/upload':
-                kind = self.headers.get('X-Atelier-Kind')
-                parent_id = self.headers.get('X-Atelier-Source') or None
-                if kind is not None and kind not in ('chatgpt-edit','chatgpt-generate'):
-                    raise ValueError('Ungültige Motivvariante.')
-                if parent_id:
-                    if kind != 'chatgpt-edit':
-                        raise ValueError('Ungültige Ausgangsvorlage.')
-                    project(parent_id)
-                if kind == 'chatgpt-edit' and not parent_id:
-                    raise ValueError('Ausgangsvorlage fehlt. Bildbearbeitung erneut vorbereiten.')
                 with WORKERS:
                     image = decode(self.body(20*1024*1024))
                     name = urllib.parse.unquote(self.headers.get('X-Filename','Motiv'))
-                    return self.send(create(image,name,parent_id,kind))
+                    return self.send(create(image,name))
             body = json.loads(self.body(16000))
             if not isinstance(body,dict):
                 raise ValueError('Ungültige Anfrage.')
             if route == '/api/demo':
                 return self.send(create(demo(),'Testmotiv · Farbflächen'))
-            if route == '/api/ai/handoff':
-                request = handoff_request(body)
-                stats, image_data = None, None
-                if request['action'] == 'edit':
-                    directory = project(body.get('id'))
-                    with WORKERS:
-                        with Image.open(directory/'original.png') as original:
-                            if request['image_source'] == 'prepared':
-                                image, stats = prepare(original,request['settings'],max_edge=2048)
-                                request['settings'] = stats['settings']
-                            else:
-                                image = original.copy()
-                                image.thumbnail((2048,2048))
-                                request['settings']['width_mm'] = physical_width(image,request['settings'])
-                            image_data='data:image/png;base64,'+base64.b64encode(png(image,request['settings']['width_mm'])).decode()
-                return self.send(dict(prompt=make_prompt(request,stats),image=image_data,
-                                      action=request['action'],source_id=body.get('id') if request['action']=='edit' else None,
-                                      settings=request['settings']))
-            if route == '/api/ai/connect':
-                return self.send(dict(url=AI.start(self.session())))
-            if route == '/api/ai/disconnect':
-                confirmed = AI.disconnect()
-                return self.send(dict(message='Verbindung getrennt.' if confirmed else 'Lokal getrennt. Den Widerruf in den ChatGPT-Einstellungen prüfen.'))
-            if route in ('/api/preview','/api/export','/api/ai/suggest'):
+            if route in ('/api/preview','/api/export'):
                 directory = project(body.get('id'))
                 s = settings(body.get('settings',{}))
-                if route == '/api/ai/suggest':
-                    if not AI_WORKER.acquire(blocking=False):
-                        return self.send(dict(error='Eine KI-Anfrage läuft bereits.'),status=429)
-                    try:
-                        with Image.open(directory/'original.png') as original:
-                            with WORKERS:
-                                prepared, stats = prepare(original,s,max_edge=768)
-                            original.thumbnail((768,768))
-                            result = AI.suggest(png(original),str(body.get('model','')),stats['settings'],
-                                                str(body.get('mode','logo'))[:30],str(body.get('goal',''))[:1000],png(prepared),stats)
-                        return self.send(result)
-                    finally:
-                        AI_WORKER.release()
                 with WORKERS:
                     with Image.open(directory/'original.png') as original:
                         image, stats = prepare(original,s,max_edge=1200 if route == '/api/preview' else 2400)
@@ -267,8 +195,6 @@ class Handler(BaseHTTPRequestHandler):
             self.send(dict(error='Verarbeitung fehlgeschlagen. Bitte erneut versuchen.'),status=500)
 
 if __name__ == '__main__':
-    callback = ThreadingHTTPServer(('0.0.0.0',1455),Handler)
-    threading.Thread(target=callback.serve_forever,daemon=True).start()
     port = int(os.environ.get('ATELIER_PORT','8080'))
     host = os.environ.get('ATELIER_BIND','0.0.0.0')
     print(f'Stickatelier bereit auf Port {port}.')

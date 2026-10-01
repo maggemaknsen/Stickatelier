@@ -56,11 +56,11 @@ class AuthenticationTests(unittest.TestCase):
 
     def test_all_private_routes_require_password_even_with_anonymous_cookie(self):
         self.assertIn('Kennwort'.encode(),self.client.open(self.base).read())
-        for path in ['/app.js','/color-tools.js','/api/projects','/api/original?id='+'a'*32,'/api/project?id='+'a'*32,'/api/ai/status','/api/ai/models']:
+        for path in ['/app.js','/color-tools.js','/api/projects','/api/original?id='+'a'*32,'/api/project?id='+'a'*32]:
             with self.subTest(path=path):
                 with self.assertRaises(urllib.error.HTTPError) as e:self.client.open(self.base+path)
                 self.assertEqual(e.exception.code,401)
-        for path in ['/api/demo','/api/upload','/api/preview','/api/export','/api/ai/handoff','/api/ai/connect','/api/ai/disconnect','/api/ai/suggest','/auth/logout']:
+        for path in ['/api/demo','/api/upload','/api/preview','/api/export','/auth/logout']:
             with self.subTest(path=path):
                 with self.assertRaises(urllib.error.HTTPError) as e:self.post(path)
                 self.assertEqual(e.exception.code,401)
@@ -110,17 +110,11 @@ class AuthenticationTests(unittest.TestCase):
         with self.module.AUTH.lock:self.module.AUTH.failures['127.0.0.1']=(5,time.monotonic()-1)
         self.assertEqual(self.login().status,200)
 
-    def test_expired_session_and_callback_cannot_bypass_login(self):
+    def test_expired_session_cannot_bypass_login(self):
         self.login().read();sid=self.sid()
         with self.module.AUTH.lock:self.module.AUTH.sessions[sid]=(True,time.monotonic()-1)
         with self.assertRaises(urllib.error.HTTPError) as e:self.client.open(self.base+'/api/projects')
         self.assertEqual(e.exception.code,401)
-        actual_port=self.http.server_port
-        try:
-            self.http.server_port=1455
-            with self.assertRaises(urllib.error.HTTPError) as e:self.client.open(self.base+'/auth/callback?code=local-test')
-            self.assertEqual(e.exception.code,401)
-        finally:self.http.server_port=actual_port
 
     def test_missing_short_password_fails_closed_and_secure_cookie_supported(self):
         with patch.dict(os.environ,ATELIER_PASSWORD_FILE=str(Path(self.temp.name)/'missing')):

@@ -141,7 +141,7 @@ class PreparationTests(unittest.TestCase):
                     self.assertAlmostEqual(stats['width_mm'],expected[0])
                     self.assertAlmostEqual(stats['height_mm'],expected[1])
                     self.assertEqual(stats['long_side_mm'],160)
-                    # AI suggestions revalidate the resolved settings too.
+                    # Resolved settings retain the chosen long side.
                     self.assertEqual(settings(stats['settings'])['long_side_mm'],160)
                     restored=Image.open(BytesIO(png(result,stats['width_mm'])))
                     self.assertAlmostEqual(max(restored.size)/restored.info['dpi'][0]*25.4,160,delta=0.2)
