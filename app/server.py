@@ -102,9 +102,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(dict(error='Bitte im Stickatelier anmelden.'),status=401)
             if url.path == '/login':
                 return self.send('',status=303,extra={'Location':'/'})
-            if url.path in ('/','/app.js','/color-tools.js','/fill-cursor.svg'):
+            if url.path in ('/','/app.js','/color-tools.js','/fill-cursor.svg','/fill-preview-worker.js'):
                 name = 'index.html' if url.path == '/' else url.path[1:]
-                mime = {'index.html':'text/html; charset=utf-8','app.js':'text/javascript; charset=utf-8','color-tools.js':'text/javascript; charset=utf-8','style.css':'text/css; charset=utf-8','favicon.svg':'image/svg+xml','fill-cursor.svg':'image/svg+xml'}[name]
+                mime = {'index.html':'text/html; charset=utf-8','app.js':'text/javascript; charset=utf-8','color-tools.js':'text/javascript; charset=utf-8','fill-preview-worker.js':'text/javascript; charset=utf-8','style.css':'text/css; charset=utf-8','favicon.svg':'image/svg+xml','fill-cursor.svg':'image/svg+xml'}[name]
                 extra = {}
                 return self.send((ROOT/'static'/name).read_bytes(),mime,extra=extra)
             if url.path == '/api/projects':
@@ -153,7 +153,8 @@ class Handler(BaseHTTPRequestHandler):
                     image = decode(self.body(20*1024*1024))
                     name = urllib.parse.unquote(self.headers.get('X-Filename','Motiv'))
                     return self.send(create(image,name))
-            body = json.loads(self.body(16000))
+            # Authenticated editing requests include bounded brush point lists.
+            body = json.loads(self.body(1024*1024))
             if not isinstance(body,dict):
                 raise ValueError('Ungültige Anfrage.')
             if route == '/api/demo':

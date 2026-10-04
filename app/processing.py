@@ -10,7 +10,7 @@ Image.MAX_IMAGE_PIXELS = 24_000_000
 warnings.simplefilter('error', Image.DecompressionBombWarning)
 DEFAULTS = dict(colors=6, width_mm=100, long_side_mm=None, short_side_mm=None, smooth=0, contrast=100,
                 detail_mm=0, darken_mm=0, remove_bg=False,
-                background='#ffffff', tolerance=20, palette_edit=None, fill_edits=[])
+                background='#ffffff', tolerance=20, color_space='rgb', palette_edit=None, fill_edits=[])
 LIMITS = dict(colors=(1, 24), width_mm=(10, 260), smooth=(0, 3),
               contrast=(50, 180), detail_mm=(0, 2), darken_mm=(0, 0.8), tolerance=(0, 120))
 
@@ -18,6 +18,10 @@ def settings(raw):
     if not isinstance(raw, dict):
         raise ValueError('Einstellungen müssen ein Objekt sein.')
     out = DEFAULTS.copy()
+    color_space = raw.get('color_space', 'rgb')
+    if color_space not in ('rgb', 'oklab'):
+        raise ValueError('Ungültige Methode für die Farbreduktion.')
+    out['color_space'] = color_space
     if raw.get('short_side_mm') is not None:
         val = float(raw['short_side_mm'])
         if not math.isfinite(val) or val < 10:
@@ -66,9 +70,30 @@ def settings(raw):
         out['palette_edit'] = dict(base=base, map=normalized)
     fills = raw.get('fill_edits', [])
     if not isinstance(fills, list) or len(fills) > 100:
-        raise ValueError('Höchstens 100 Füllungen pro Motiv verwenden.')
+        raise ValueError('Höchstens 100 Füllungen und Pinselstriche pro Motiv verwenden.')
     out['fill_edits'] = []
+    brush_points = 0
     for fill in fills:
+        if isinstance(fill, dict) and fill.get('type') == 'brush':
+            if set(fill) != {'type', 'points', 'size', 'color'}:
+                raise ValueError('Ungültiger Pinselstrich.')
+            points, size, color = fill['points'], fill['size'], fill['color']
+            if not isinstance(points, list) or not 1 <= len(points) <= 2000:
+                raise ValueError('Ein Pinselstrich darf höchstens 2000 Punkte enthalten.')
+            brush_points += len(points)
+            if brush_points > 20_000:
+                raise ValueError('Zu viele Pinselpunkte. Bitte einige Striche zurücknehmen.')
+            for point in points:
+                if not isinstance(point, list) or len(point) != 2 or not all(
+                        isinstance(v, (int, float)) and not isinstance(v, bool)
+                        and math.isfinite(v) and 0 <= v < 1 for v in point):
+                    raise ValueError('Ungültige Pinselposition.')
+            if not isinstance(size, (int, float)) or isinstance(size, bool) or not math.isfinite(size) or not 0.001 <= size <= 0.5:
+                raise ValueError('Ungültige Pinselgröße.')
+            if not isinstance(color, str) or not re.fullmatch(r'#[0-9a-fA-F]{6}', color):
+                raise ValueError('Ungültige Pinselfarbe.')
+            out['fill_edits'].append(dict(type='brush', points=[list(p) for p in points], size=size, color=color.lower()))
+            continue
         if not isinstance(fill, dict) or set(fill) != {'x', 'y', 'color'}:
             raise ValueError('Ungültige Füllung.')
         if not all(isinstance(fill[k], (int, float)) and not isinstance(fill[k], bool)
@@ -106,6 +131,22 @@ def fill_region(rgb, alpha, fill):
                 line = candidate[row,left:right+1]
                 starts = np.flatnonzero(line & ~np.r_[False,line[:-1]])
                 pending.extend((left+int(start),row) for start in starts)
+
+
+def paint_stroke(rgb, alpha, stroke):
+    """Draw a hard-edged round brush over visible pixels, preserving transparency."""
+    h, w = alpha.shape
+    diameter = max(1, round(stroke['size'] * min(w, h)))
+    points = [(min(w-1, int(x*w)), min(h-1, int(y*h))) for x, y in stroke['points']]
+    mask = Image.new('L', (w, h))
+    draw = ImageDraw.Draw(mask)
+    if len(points) > 1:
+        draw.line(points, fill=255, width=diameter, joint='curve')
+    radius = (diameter-1) / 2
+    for x, y in points:
+        draw.ellipse((x-radius, y-radius, x+radius, y+radius), fill=255)
+    selected = (np.asarray(mask) > 0) & (alpha > 0)
+    rgb[selected] = [int(stroke['color'][i:i+2], 16) for i in (1,3,5)]
 
 def decode(data):
     try:
@@ -153,7 +194,34 @@ def components(mask):
     lookup = np.array([root(i) for i in range(len(parent))], dtype=np.int32)
     return lookup[labels]
 
-def quantize(rgb, alpha, count):
+def rgb_to_oklab(rgb):
+    """sRGB bytes to perceptual coordinates, using Björn Ottosson's matrices.
+
+    Source: https://bottosson.github.io/posts/oklab/ (public domain / MIT).
+    """
+    srgb = np.asarray(rgb, dtype=np.float64) / 255
+    linear = np.where(srgb <= 0.04045, srgb / 12.92, ((srgb + 0.055) / 1.055) ** 2.4)
+    lms = linear @ np.array([[0.4122214708, 0.2119034982, 0.0883024619],
+                             [0.5363325363, 0.6806995451, 0.2817188376],
+                             [0.0514459929, 0.1073969566, 0.6299787005]])
+    return np.cbrt(lms) @ np.array([[0.2104542553, 1.9779984951, 0.0259040371],
+                                   [0.7936177850, -2.4285922050, 0.7827717662],
+                                   [-0.0040720468, 0.4505937099, -0.8086757660]])
+
+
+def oklab_to_rgb(lab):
+    """Convert palette centers back to displayable sRGB bytes."""
+    lms = (np.asarray(lab) @ np.array([[1, 1, 1],
+                                     [0.3963377774, -0.1055613458, -0.0894841775],
+                                     [0.2158037573, -0.0638541728, -1.2914855480]])) ** 3
+    linear = np.clip(lms @ np.array([[4.0767416621, -1.2684380046, -0.0041960863],
+                                    [-3.3077115913, 2.6097574011, -0.7034186147],
+                                    [0.2309699292, -0.3413193965, 1.7076147010]]), 0, 1)
+    srgb = np.where(linear <= 0.0031308, 12.92 * linear, 1.055 * linear ** (1 / 2.4) - 0.055)
+    return np.clip(np.rint(srgb * 255), 0, 255).astype(np.uint8)
+
+
+def quantize(rgb, alpha, count, color_space='rgb'):
     visible = rgb[alpha > 0]
     if not len(visible):
         raise ValueError('Keine sichtbaren Flächen übrig. Hintergrundtoleranz oder Detailfilter reduzieren.')
@@ -180,6 +248,8 @@ def quantize(rgb, alpha, count):
         # variations of one dominant color. Initialization is deterministic.
         bins, inverse, weights = np.unique(samples >> 3, axis=0, return_inverse=True, return_counts=True)
         points = np.column_stack([np.bincount(inverse, weights=samples[:,i])/weights for i in range(3)])
+        if color_space == 'oklab':
+            points = rgb_to_oklab(points)
         centers = [points[weights.argmax()]]
         distance = np.full(len(points), np.inf)
         for _ in range(1,min(count,len(points))):
@@ -193,19 +263,24 @@ def quantize(rgb, alpha, count):
                 sel = assigned == i
                 if sel.any():
                     updated[i] = np.average(points[sel],axis=0,weights=weights[sel])
-            if np.max(np.abs(updated-centers)) < 0.3:
+            if np.max(np.abs(updated-centers)) < (0.001 if color_space == 'oklab' else 0.3):
                 break
             centers = updated
-        chosen = np.unique(np.clip(np.rint(updated),0,255).astype(np.uint8),axis=0)
-    return assign_palette(rgb, alpha, chosen)
+        chosen = np.unique(oklab_to_rgb(updated) if color_space == 'oklab'
+                           else np.clip(np.rint(updated),0,255).astype(np.uint8),axis=0)
+    return assign_palette(rgb, alpha, chosen, color_space)
 
-def assign_palette(rgb, alpha, chosen):
+def assign_palette(rgb, alpha, chosen, color_space='rgb'):
     """Use the same base colors for preview and export during manual editing."""
     ids = np.zeros(alpha.shape, dtype=np.uint8)
     flat = rgb.reshape(-1, 3)
     target = ids.ravel()
+    palette_points = rgb_to_oklab(chosen) if color_space == 'oklab' else chosen
     for start in range(0, len(flat), 30_000):
-        diff = flat[start:start+30_000, None, :].astype(np.int32) - chosen[None, :, :].astype(np.int32)
+        if color_space == 'oklab':
+            diff = rgb_to_oklab(flat[start:start+30_000])[:,None,:] - palette_points[None,:,:]
+        else:
+            diff = flat[start:start+30_000, None, :].astype(np.int32) - chosen[None, :, :].astype(np.int32)
         target[start:start+30_000] = (diff * diff).sum(axis=2).argmin(axis=1)
     return chosen[ids], ids, chosen
 
@@ -297,9 +372,11 @@ def prepare(original, raw, max_edge=1200):
     edit = s['palette_edit']
     if edit:
         pal = np.array([[int(c[i:i+2], 16) for i in (1,3,5)] for c in edit['base']], dtype=np.uint8)
-        rgb, ids, pal = assign_palette(rgb, alpha, pal)
+        rgb, ids, pal = assign_palette(rgb, alpha, pal, s['color_space'])
     else:
-        rgb, ids, pal = quantize(rgb, alpha, s['colors'])
+        rgb, ids, pal = quantize(rgb, alpha, s['colors'], s['color_space'])
+    if s['color_space'] == 'oklab':
+        notices.append('OKLab-Farbreduktion aktiv. Farbunterschiede werden nach menschlicher Wahrnehmung angenähert; einzelne Motivbereiche werden nicht erkannt.')
     removed = 0
     if s['detail_mm']:
         area = max(1, (s['detail_mm'] * px_mm)**2)
@@ -317,15 +394,18 @@ def prepare(original, raw, max_edge=1200):
             rgb[(codes == int(origin[1:], 16)) & (alpha > 0)] = [int(target[i:i+2], 16) for i in (1,3,5)]
         notices.append('Manuelle Farbzuordnung aktiv. Die Basispalette bleibt für Vorschau und Export fixiert.')
     for fill in s['fill_edits']:
-        fill_region(rgb, alpha, fill)
+        if fill.get('type') == 'brush':
+            paint_stroke(rgb, alpha, fill)
+        else:
+            fill_region(rgb, alpha, fill)
     if s['fill_edits']:
-        notices.append(f"{len(s['fill_edits'])} Bereiche manuell gefüllt. Geschlossene Grenzen und transparente Flächen prüfen.")
+        notices.append(f"{len(s['fill_edits'])} Füllungen und Pinselstriche angewendet. Grenzen und kleine Details prüfen.")
     rgba = np.dstack((rgb, alpha))
     rgba[alpha == 0, :3] = 0
     result = Image.fromarray(rgba)
     colors, counts = np.unique(rgb[alpha > 0], axis=0, return_counts=True)
     if s['fill_edits'] and len(colors) > s['colors']:
-        notices.append(f"Zusätzliche Füllfarben: Das Motiv enthält jetzt {len(colors)} Farben. Die Farbreduktion bleibt bei {s['colors']} Basisfarben.")
+        notices.append(f"Zusätzliche Korrekturfarben: Das Motiv enthält jetzt {len(colors)} Farben. Die Farbreduktion bleibt bei {s['colors']} Basisfarben.")
     order = np.argsort(-counts)
     height_mm = (s['long_side_mm'] if image.height >= image.width else s['long_side_mm'] * image.height/image.width) if s['long_side_mm'] is not None else s['width_mm'] * image.height/image.width
     if not math.isfinite(height_mm):

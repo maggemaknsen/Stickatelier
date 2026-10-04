@@ -1,6 +1,21 @@
 'use strict';
 // Pure pixel helpers shared by the image picker and the display-only overlay.
 const ColorTools={
+ region(pixels,width,height,x,y){
+  const visited=new Uint8Array(width*height),runs=[];let count=0;
+  const seed=(y*width+x)*4,transparent=pixels[seed+3]===0;
+  const matches=i=>!visited[i]&&(transparent?pixels[i*4+3]===0:pixels[i*4+3]>0&&pixels[i*4]===pixels[seed]&&pixels[i*4+1]===pixels[seed+1]&&pixels[i*4+2]===pixels[seed+2]);
+  const pending=[y*width+x];
+  while(pending.length){
+   const i=pending.pop();if(!matches(i))continue;
+   const row=Math.floor(i/width),start=row*width;let left=i%width,right=left;
+   while(left>0&&matches(start+left-1))left--;
+   while(right+1<width&&matches(start+right+1))right++;
+   visited.fill(1,start+left,start+right+1);runs.push(row,left,right);count+=right-left+1;
+   for(const next of [row-1,row+1])if(next>=0&&next<height){let inside=false;for(let col=left;col<=right;col++){const match=matches(next*width+col);if(match&&!inside)pending.push(next*width+col);inside=match;}}
+  }
+  return {visited,runs,count};
+ },
  point(x,y,rect,width,height){
   if(width<=0||height<=0||rect.width<=0||rect.height<=0)return null;
   const scale=Math.min(rect.width/width,rect.height/height),w=width*scale,h=height*scale;
