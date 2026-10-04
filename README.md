@@ -115,6 +115,18 @@ Vor dem lokalen Serverstart ebenfalls `password.txt` mit der Kennworteingabe aus
 
 Node.js wird nur für die Tests der Pixelwerkzeuge und des Oberflächenstarts gebraucht; der Docker-Betrieb benötigt weiterhin ausschließlich Python.
 
+## Creator-Verknüpfung auf Windows
+
+Unter dem PNG-Export steht „Creator-Verknüpfung einrichten“. Auf dem PC mit Creator V9 den vollständigen Pfad zur EXE eintragen (ohne zusätzliche Argumente; Eigenschaften → Ziel der Verknüpfung). Diese Einstellung wird pro Browser und Stickatelier-Adresse lokal gespeichert, nicht als allgemeine Servereinstellung. Der Server prüft die Syntax des Pfads; die tatsächliche Installation wird erst vom Windows-Helfer geprüft.
+
+„Windows-Helfer herunterladen“ erstellt ein ZIP mit der gewählten EXE und der aktuellen Stickatelier-Adresse. Entpacken, config.json kontrollieren und install.cmd ausführen. Die Einrichtung registriert ausschließlich für den aktuellen Windows-Benutzer das Protokoll stickatelier:// und benötigt keine Administratorrechte, kein Python und keinen Hintergrunddienst. Danach „Windows-Helfer auf diesem PC eingerichtet“ aktivieren und speichern. Ein geänderter Pfad oder eine andere Stickatelier-Adresse benötigt ein neues Einrichtungspaket.
+
+„In Creator V9 öffnen“ bereitet dasselbe PNG wie der normale Export vor. Im anschließenden Dialog „Creator jetzt öffnen“ anklicken und die Browser-Abfrage erlauben. Der Helfer lädt das PNG und startet die fest eingerichtete EXE mit einem lokalen Dateiparameter. Der Browser kann weder die Installation erkennen noch bestätigen, ob Creator die PNG-Datei tatsächlich importiert. Dies muss auf dem Ziel-PC geprüft werden. Falls nur das Programm startet, befindet sich das PNG unter %LOCALAPPDATA%\Stickatelier\CreatorBridge\Exports für den manuellen Bildimport.
+
+Die Download-Übergabe ist einmalig, zwei Minuten gültig und an eine weiterhin angemeldete Atelier-Sitzung gebunden. Das Atelier-Passwort wird nicht im Helfer gespeichert. Download-URLs dürfen nur auf den eingerichteten Server und den vorgesehenen PNG-Endpunkt verweisen; Weiterleitungen sind deaktiviert. Der Link selbst kann keinen anderen Programmpfad oder zusätzliche Startargumente bestimmen. Der Helfer ist unter %LOCALAPPDATA%\Stickatelier\CreatorBridge installiert; uninstall.ps1 deaktiviert das Protokoll und lässt PNG-Dateien erhalten.
+
+Die Creator-Verknüpfung wurde nicht auf dem anderen PC getestet; die tatsächliche Übernahme des Dateiparameters in Creator ist unbestätigt.
+
 ## Füllvorschau und Farbe unter dem Mauszeiger
 
 Bei aktivem Füllwerkzeug wird die zusammenhängende Fläche unter dem Mauszeiger halbtransparent mit der gewählten Farbe markiert. Erst der Klick füllt sie. Die Vorschau verwendet dieselbe Vierer-Nachbarschaft und exakte sichtbare RGB-Farbe wie die eigentliche Füllung; transparente Bereiche werden ebenfalls erkannt. Die Berechnung läuft in einem lokalen Web Worker und ist leicht verzögert, damit Mausbewegungen und Zeichnen bedienbar bleiben. Während wartende Korrekturen verarbeitet werden, wird keine veraltete Füllfläche markiert. Nach der Bildaktualisierung wird die Vorschau neu berechnet.

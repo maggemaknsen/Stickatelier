@@ -1,0 +1,20 @@
+Stickatelier - Creator-Verknuepfung fuer diesen Windows-PC
+
+1. ZIP vollstaendig entpacken.
+2. Programmpfad und Serveradresse in config.json kontrollieren.
+3. install.cmd starten. Keine Administratorrechte erforderlich.
+4. In Stickatelier "Windows-Helfer eingerichtet" aktivieren und speichern.
+5. "In Creator V9 oeffnen" anklicken und die Browser-Abfrage erlauben.
+
+Bei Pfad- oder Serveradressenaenderungen ein neues Einrichtungspaket installieren.
+Der Helfer startet ausschliesslich die in config.json eingerichtete EXE und
+uebergibt das heruntergeladene PNG als Dateiparameter. Ob Creator V9 diesen
+Parameter als Bildimport uebernimmt, muss auf dem Ziel-PC geprueft werden.
+Falls nur Creator startet: PNG unter %LOCALAPPDATA%\Stickatelier\CreatorBridge\Exports
+ueber die Bildimport-Funktion in Creator laden. Der normale PNG-Download bleibt verfuegbar.
+
+Downloads sind einmalig und zwei Minuten gueltig. Kein Atelier-Passwort wird
+auf dem PC gespeichert. Der Helfer akzeptiert nur die eingerichtete Serveradresse.
+Er benoetigt weder einen laufenden Hintergrunddienst noch Python.
+
+Deinstallation: uninstall.ps1 per PowerShell ausfuehren. Der Link wird deaktiviert.

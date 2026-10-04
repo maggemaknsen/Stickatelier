@@ -16,6 +16,8 @@ let painting=false, stroke=null;
 let pickingBackground=false, locatedColor=null, locatePreviousView=null;
 const zoomSteps=[.25,.5,.75,1,1.25,1.5,2,3,4,6,8];
 let zoom=1;
+let creatorConfig={path:'',ready:false};
+try{const saved=JSON.parse(localStorage.getItem('stickatelier.creator')||'{}');if(typeof saved.path==='string')creatorConfig={path:saved.path,ready:saved.ready===true};}catch{}
 function values(){const s={};for(const key of keys)s[key]=key==='remove_bg'?$(key).checked:['background','color_space'].includes(key)?$(key).value:Number($(key).value);s.palette_edit=paletteEdit;s.fill_edits=fillEdits;return s;}
 function valid(){const w=Number($('short_side_mm').value);return Number.isFinite(w)&&w>=10;}
 function sizeFeedback(){
@@ -42,6 +44,7 @@ function buttons(){
  $('fillProgress').hidden=!fillingPending;
  $('previewButton').disabled=!current||!valid()||uploading||fillApplying||fillQueueRunning||!!stroke;
  $('exportButton').disabled=!current||!valid()||exporting||uploading||fillApplying||fillQueueRunning||!!stroke||JSON.stringify(renderedSettings)!==JSON.stringify(values());
+ $('creatorButton').disabled=$('exportButton').disabled||!creatorConfig.path||!creatorConfig.ready;
  const paletteReady=!!current&&valid()&&!uploading&&!fillApplying&&!fillQueueRunning&&!stroke&&JSON.stringify(renderedSettings)===JSON.stringify(values());
  for(const b of $('palette').querySelectorAll('button'))b.disabled=!paletteReady;
  for(const b of $('palette').querySelectorAll('.swatch'))b.disabled=!paletteReady&&!(pickingBackground&&current&&!uploading);
@@ -449,4 +452,37 @@ $('exportButton').onclick=async()=>{
   toast('Vorlage exportiert. Zielgröße anschließend in Creator 9 prüfen.');
  }catch(error){toast(error.message);}finally{exporting=false;buttons();}
 };
+function downloadFile(blob,name){const link=document.createElement('a'),url=URL.createObjectURL(blob);link.href=url;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);}
+function creatorPath(){return $('creatorPath').value.trim().replace(/^"(.*)"$/, '$1');}
+function creatorPathValid(){return /^[a-z]:\\[^"<>|?*\x00-\x1f]+\.exe$/i.test(creatorPath());}
+$('creatorSettings').onclick=()=>{$('creatorPath').value=creatorConfig.path;$('creatorHelperReady').checked=creatorConfig.ready;$('creatorError').hidden=true;$('creatorDialog').showModal();};
+$('closeCreatorDialog').onclick=()=>{$('creatorDialog').close();};
+$('creatorPath').oninput=()=>{$('creatorHelperReady').checked=false;$('creatorError').hidden=true;};
+$('saveCreatorSettings').onclick=()=>{
+ if(!creatorPathValid()){$('creatorError').textContent='Bitte einen vollständigen Windows-Pfad zur EXE ohne Startargumente eingeben.';$('creatorError').hidden=false;return;}
+ const config={path:creatorPath(),ready:$('creatorHelperReady').checked};
+ try{localStorage.setItem('stickatelier.creator',JSON.stringify(config));}catch{$('creatorError').textContent='Die Browsereinstellungen erlauben kein lokales Speichern.';$('creatorError').hidden=false;return;}
+ creatorConfig=config;$('creatorDialog').close();buttons();toast('Creator-Einstellungen auf diesem PC gespeichert.');
+};
+$('downloadCreatorSetup').onclick=async()=>{
+ $('creatorError').hidden=true;$('downloadCreatorSetup').disabled=true;
+ try{
+  const response=await api('/api/creator-setup',{executable:creatorPath(),origin:window.location.origin});
+  downloadFile(await response.blob(),'stickatelier-creator-einrichtung.zip');
+  toast('ZIP auf dem Creator-PC entpacken und install.cmd starten. Anschließend „Windows-Helfer eingerichtet“ aktivieren und speichern.');
+ }catch(error){$('creatorError').textContent=error.message;$('creatorError').hidden=false;}finally{$('downloadCreatorSetup').disabled=false;}
+};
+$('creatorButton').onclick=async()=>{
+ if($('creatorButton').disabled)return;
+ exporting=true;buttons();const id=current.id;
+ try{
+  const result=await(await api('/api/creator-export',{id,settings:values()})).json();
+  if(current?.id!==id)return;
+  const url=new URL(result.path,window.location.origin);
+  $('creatorLaunchLink').href='stickatelier://open?url='+encodeURIComponent(url.href);
+  $('creatorLaunchDialog').showModal();
+ }catch(error){toast(error.message);}finally{exporting=false;buttons();}
+};
+$('closeCreatorLaunch').onclick=()=>$('creatorLaunchDialog').close();
+$('creatorLaunchLink').onclick=()=>{$('creatorLaunchDialog').close();};
 labels();applyView();recent();

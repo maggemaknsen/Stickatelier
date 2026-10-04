@@ -12,6 +12,7 @@ import uuid
 from PIL import Image
 from processing import decode, prepare, png, demo, settings
 from auth import PasswordAuth
+from creator import Handoffs, setup_bundle
 
 ROOT = Path(__file__).parent
 DATA = Path(os.environ.get('ATELIER_DATA', str(ROOT.parent/'data')))
@@ -21,6 +22,7 @@ PROJECTS.mkdir(exist_ok=True)
 WORKERS = threading.BoundedSemaphore(2)
 HOSTS = set(os.environ.get('ATELIER_HOSTS','127.0.0.1,localhost').split(','))
 AUTH = PasswordAuth.from_environment(ROOT.parent/'password.txt')
+CREATOR_HANDOFFS = Handoffs()
 
 def project(identifier):
     if not isinstance(identifier,str) or not re.fullmatch(r'[0-9a-f]{32}',identifier):
@@ -90,6 +92,11 @@ class Handler(BaseHTTPRequestHandler):
             args = urllib.parse.parse_qs(url.query)
             if url.path == '/api/health':
                 return self.send(dict(ok=True))
+            if url.path == '/api/creator-file':
+                handoff = CREATOR_HANDOFFS.consume(args.get('token', [''])[0])
+                if not handoff or not AUTH.valid(handoff[2], True):
+                    return self.send(dict(error='Übergabe abgelaufen oder bereits verwendet. Bitte erneut in Creator öffnen.'),status=410)
+                return self.send(handoff[1].read_bytes(), 'image/png', extra={'Content-Disposition':'attachment; filename="stickatelier-motiv.png"'})
             if url.path in ('/style.css','/login.js','/favicon.svg') or (url.path in ('/','/login') and not self.session()):
                 login = url.path in ('/','/login')
                 name = 'login.html' if login else url.path[1:]
@@ -159,7 +166,13 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('Ungültige Anfrage.')
             if route == '/api/demo':
                 return self.send(create(demo(),'Testmotiv · Farbflächen'))
-            if route in ('/api/preview','/api/export'):
+            if route == '/api/creator-setup':
+                source = urllib.parse.urlsplit(body.get('origin', ''))
+                if source.scheme not in ('http', 'https') or source.hostname not in HOSTS or source.netloc != self.headers.get('Host') or source.path or source.query or source.fragment or source.username:
+                    raise ValueError('Ungültige Stickatelier-Adresse.')
+                output = setup_bundle(body.get('executable'), f'{source.scheme}://{source.netloc}')
+                return self.send(output, 'application/zip', extra={'Content-Disposition':'attachment; filename="stickatelier-creator-einrichtung.zip"'})
+            if route in ('/api/preview','/api/export','/api/creator-export'):
                 directory = project(body.get('id'))
                 s = settings(body.get('settings',{}))
                 with WORKERS:
@@ -169,7 +182,13 @@ class Handler(BaseHTTPRequestHandler):
                         return self.send(dict(image='data:image/png;base64,'+base64.b64encode(png(image)).decode(),stats=stats))
                     output = png(image,stats['width_mm'])
                     digest = hashlib.sha256(json.dumps(s,sort_keys=True).encode()).hexdigest()[:16]
-                    (directory/f'export-{digest}.png').write_bytes(output)
+                    exported = directory/f'export-{digest}.png'
+                    temporary = directory/f'.export-{uuid.uuid4().hex}.png'
+                    temporary.write_bytes(output)
+                    temporary.replace(exported)
+                    if route == '/api/creator-export':
+                        token = CREATOR_HANDOFFS.issue(exported, self.session())
+                        return self.send(dict(path='/api/creator-file?token='+token))
                     return self.send(output,'image/png',extra={'Content-Disposition':'attachment; filename="stickatelier-motiv.png"'})
             return self.send(dict(error='Nicht gefunden.'),status=404)
         except (ValueError,TypeError,KeyError) as exc:
