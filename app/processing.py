@@ -8,9 +8,9 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageOps
 
 Image.MAX_IMAGE_PIXELS = 24_000_000
 warnings.simplefilter('error', Image.DecompressionBombWarning)
-DEFAULTS = dict(colors=6, width_mm=100, long_side_mm=None, smooth=0, contrast=100,
+DEFAULTS = dict(colors=6, width_mm=100, long_side_mm=None, short_side_mm=None, smooth=0, contrast=100,
                 detail_mm=0, darken_mm=0, remove_bg=False,
-                background='#ffffff', tolerance=20, palette_edit=None)
+                background='#ffffff', tolerance=20, palette_edit=None, fill_edits=[])
 LIMITS = dict(colors=(1, 24), width_mm=(10, 260), smooth=(0, 3),
               contrast=(50, 180), detail_mm=(0, 2), darken_mm=(0, 0.8), tolerance=(0, 120))
 
@@ -18,7 +18,12 @@ def settings(raw):
     if not isinstance(raw, dict):
         raise ValueError('Einstellungen müssen ein Objekt sein.')
     out = DEFAULTS.copy()
-    if raw.get('long_side_mm') is not None:
+    if raw.get('short_side_mm') is not None:
+        val = float(raw['short_side_mm'])
+        if not math.isfinite(val) or val < 10:
+            raise ValueError('Die kurze Seite muss mindestens 10 mm betragen.')
+        out['short_side_mm'] = val
+    elif raw.get('long_side_mm') is not None:
         val = float(raw['long_side_mm'])
         if not math.isfinite(val) or not 10 <= val <= 260:
             raise ValueError('Ungültiger Wert für long_side_mm.')
@@ -27,7 +32,10 @@ def settings(raw):
         val = float(raw.get(key, out[key]))
         # A narrow portrait can have an actual width below 10 mm. Legacy
         # width-only requests retain their original 10–260 mm validation.
-        valid = 0 < val <= hi if key == 'width_mm' and out['long_side_mm'] is not None else lo <= val <= hi
+        if key == 'width_mm' and out['short_side_mm'] is not None:
+            valid = val > 0
+        else:
+            valid = 0 < val <= hi if key == 'width_mm' and out['long_side_mm'] is not None else lo <= val <= hi
         if not math.isfinite(val) or not valid:
             raise ValueError(f'Ungültiger Wert für {key}.')
         out[key] = int(val) if key in ('colors', 'smooth', 'contrast', 'tolerance') else val
@@ -56,7 +64,48 @@ def settings(raw):
         if len(normalized) != len(mapping):
             raise ValueError('Doppelte Farbzuordnung.')
         out['palette_edit'] = dict(base=base, map=normalized)
+    fills = raw.get('fill_edits', [])
+    if not isinstance(fills, list) or len(fills) > 100:
+        raise ValueError('Höchstens 100 Füllungen pro Motiv verwenden.')
+    out['fill_edits'] = []
+    for fill in fills:
+        if not isinstance(fill, dict) or set(fill) != {'x', 'y', 'color'}:
+            raise ValueError('Ungültige Füllung.')
+        if not all(isinstance(fill[k], (int, float)) and not isinstance(fill[k], bool)
+                   and math.isfinite(fill[k]) and 0 <= fill[k] < 1 for k in ('x', 'y')):
+            raise ValueError('Ungültige Füllposition.')
+        if not isinstance(fill['color'], str) or not re.fullmatch(r'#[0-9a-fA-F]{6}', fill['color']):
+            raise ValueError('Ungültige Füllfarbe.')
+        out['fill_edits'].append(dict(x=fill['x'], y=fill['y'], color=fill['color'].lower()))
     return out
+
+def fill_region(rgb, alpha, fill):
+    """Fill one four-connected exact-color region, including transparent holes."""
+    h, w = alpha.shape
+    x, y = min(w-1, int(fill['x']*w)), min(h-1, int(fill['y']*h))
+    color = np.array([int(fill['color'][i:i+2], 16) for i in (1,3,5)], dtype=np.uint8)
+    if alpha[y,x] > 0 and np.array_equal(rgb[y,x], color):
+        return
+    candidate = (alpha == 0) if alpha[y,x] == 0 else ((alpha > 0) & np.all(rgb == rgb[y,x].copy(), axis=2))
+    # Scanline flood fill avoids a Python object per pixel and recursion limits.
+    pending = [(x,y)]
+    while pending:
+        x, y = pending.pop()
+        if not candidate[y,x]:
+            continue
+        left, right = x, x
+        while left > 0 and candidate[y,left-1]:
+            left -= 1
+        while right+1 < w and candidate[y,right+1]:
+            right += 1
+        candidate[y,left:right+1] = False
+        rgb[y,left:right+1] = color
+        alpha[y,left:right+1] = 255
+        for row in (y-1,y+1):
+            if 0 <= row < h:
+                line = candidate[row,left:right+1]
+                starts = np.flatnonzero(line & ~np.r_[False,line[:-1]])
+                pending.extend((left+int(start),row) for start in starts)
 
 def decode(data):
     try:
@@ -198,7 +247,9 @@ def clean_islands(ids, alpha, palette, threshold):
     return result, result_alpha, count
 
 def physical_width(image, s):
-    """Resolve the requested long side into the actual width of this raster."""
+    """Resolve the selected side, retaining support for older sizing requests."""
+    if s['short_side_mm'] is not None:
+        return s['short_side_mm'] if image.width <= image.height else s['short_side_mm'] * image.width / image.height
     if s['long_side_mm'] is not None:
         return s['long_side_mm'] if image.width >= image.height else s['long_side_mm'] * image.width / image.height
     return s['width_mm']
@@ -208,6 +259,8 @@ def prepare(original, raw, max_edge=1200):
     image = original.copy()
     image.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
     s['width_mm'] = physical_width(image, s)
+    if not math.isfinite(s['width_mm']):
+        raise ValueError('Die Zielgröße ist zu groß.')
     arr = np.array(image)
     # Hard alpha is intentional: no semitransparent fringe colors for auto-digitizing.
     alpha = np.where(arr[:,:,3] >= 128, 255, 0).astype(np.uint8)
@@ -263,18 +316,28 @@ def prepare(original, raw, max_edge=1200):
         for origin, target in edit['map'].items():
             rgb[(codes == int(origin[1:], 16)) & (alpha > 0)] = [int(target[i:i+2], 16) for i in (1,3,5)]
         notices.append('Manuelle Farbzuordnung aktiv. Die Basispalette bleibt für Vorschau und Export fixiert.')
+    for fill in s['fill_edits']:
+        fill_region(rgb, alpha, fill)
+    if s['fill_edits']:
+        notices.append(f"{len(s['fill_edits'])} Bereiche manuell gefüllt. Geschlossene Grenzen und transparente Flächen prüfen.")
     rgba = np.dstack((rgb, alpha))
     rgba[alpha == 0, :3] = 0
     result = Image.fromarray(rgba)
     colors, counts = np.unique(rgb[alpha > 0], axis=0, return_counts=True)
+    if s['fill_edits'] and len(colors) > s['colors']:
+        notices.append(f"Zusätzliche Füllfarben: Das Motiv enthält jetzt {len(colors)} Farben. Die Farbreduktion bleibt bei {s['colors']} Basisfarben.")
     order = np.argsort(-counts)
     height_mm = (s['long_side_mm'] if image.height >= image.width else s['long_side_mm'] * image.height/image.width) if s['long_side_mm'] is not None else s['width_mm'] * image.height/image.width
-    if not ((s['width_mm'] <= 260 and height_mm <= 160) or (s['width_mm'] <= 160 and height_mm <= 260)):
-        notices.append('Das Motiv überschreitet die maximale b70-deco-Fläche von 260 × 160 mm, auch gedreht.')
+    if not math.isfinite(height_mm):
+        raise ValueError('Die Zielgröße ist zu groß.')
+    frame_exceeded = min(s['width_mm'], height_mm) > 160+1e-9 or max(s['width_mm'], height_mm) > 260+1e-9
+    if frame_exceeded:
+        notices.append('Zu groß für den Stickrahmen (260 × 160 mm), auch gedreht. Vorschau und Export sind weiterhin möglich.')
     notices.append('Grafikvorbereitung: Stichdichte, Unterlagen und Stichfolge anschließend in Creator 9 prüfen.')
     stats = dict(colors=len(colors), width_px=image.width, height_px=image.height,
                  width_mm=s['width_mm'], height_mm=round(height_mm,1),
                  long_side_mm=max(s['width_mm'], height_mm),
+                 short_side_mm=min(s['width_mm'], height_mm), frame_exceeded=frame_exceeded,
                  base_palette=['#'+''.join(f'{v:02x}' for v in color) for color in pal],
                  palette=[dict(hex='#'+''.join(f'{v:02x}' for v in colors[i]),
                                share=round(100*int(counts[i])/int(counts.sum()),1)) for i in order],

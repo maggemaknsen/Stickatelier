@@ -41,8 +41,8 @@ Zum Ändern des Kennworts zuerst mit `sudo chown "$(id -u):$(id -g)" password.tx
 
 1. Bild öffnen oder das technische Testmotiv laden. Unterstützt: PNG, JPG, WEBP, BMP; maximal 20 MB und 24 Millionen Pixel. SVG-Import ist in dieser Version noch nicht enthalten. Vorhandene SVGs deshalb zunächst als PNG rasterisieren.
 2. „Logo“ oder „Illustration“ wählen. Logo startet mit ausgeschalteter Glättung, Kleinstflächenfilterung und Verbreiterung. Der Modus sperrt keine Regionen: Anpassungen können auch Text verändern.
-3. **Lange Seite des Motivs** zwischen 10 und 260 mm einstellen. Im Hochformat bestimmt der Wert die Höhe, im Querformat die Breite, bei quadratischen Motiven beide Seiten. Die kürzere Seite folgt proportional: 160 mm ergeben bei einem 1:2-Motiv 80 × 160 mm, bei einem 2:1-Motiv 160 × 80 mm. Die Größe bezieht sich auf die gesamte Bildfläche einschließlich vorhandener Ränder. Die Zielgröße unter der Vorschau aktualisiert sich sofort, auch ohne Live-Vorschau. Die Ansicht passt das Motiv weiterhin an das Fenster an; sie zeigt keine reale Zentimetergröße am Bildschirm. Ungültige Werte wie 400 mm zeigen einen Hinweis und sperren Vorschau und Export bis zur Korrektur. Das Tool skaliert die Geometrie nicht unterschiedlich in Breite und Höhe.
-4. Maximale Farbanzahl einstellen. Keine Rasterung/Dithering, keine halbtransparenten Randpixel. Gezählt werden sichtbare Motivfarben; vollständig transparente Bereiche belegen keine Farbe. Wenn die sichtbare Grafik bereits innerhalb der Farbgrenze liegt, bleiben ihre exakten RGB-Farben bei der Farbreduktion erhalten – auch sehr kleine Farbakzente. Glättung, Kontrast oder Größenanpassung können davor bereits Farben ändern.
+3. **Kurze Seite des Motivs** einstellen (mindestens 10 mm, empfohlen höchstens 160 mm). Im Hochformat bestimmt der Wert die Breite, im Querformat die Höhe. Die lange Seite folgt proportional: 100 mm ergeben bei einem 1:2-Motiv 100 × 200 mm, bei einem 2:1-Motiv 200 × 100 mm. Größere Eingaben als 160 mm bleiben erlaubt. Überschreitet die kurze Seite 160 mm oder die lange Seite 260 mm, erscheint sofort ein Rahmenhinweis; Vorschau und PNG-Export bleiben nutzbar. Deshalb kann auch eine kurze Seite unter 160 mm bei sehr schmalen Motiven bereits zu groß für den Rahmen sein. Die Größe bezieht sich auf die gesamte Bildfläche einschließlich vorhandener Ränder. Die Zielgröße aktualisiert sich sofort, auch ohne Live-Vorschau. Die Bildschirmansicht ist keine reale Zentimeterdarstellung. Ungültige oder nicht endliche Werte werden abgewiesen.
+4. Farbanzahl für die Farbreduktion einstellen. Keine Rasterung/Dithering, keine halbtransparenten Randpixel. Gezählt werden sichtbare Motivfarben; vollständig transparente Bereiche belegen keine Farbe. Wenn die sichtbare Grafik bereits innerhalb der Farbgrenze liegt, bleiben ihre exakten RGB-Farben bei der Farbreduktion erhalten – auch sehr kleine Farbakzente. Glättung, Kontrast oder Größenanpassung können davor bereits Farben ändern.
 5. Weitere Regler verwenden:
    - **Glättung:** Medianfilter gegen Rauschen; Stärke wird näherungsweise an die physische Bildgröße angepasst.
    - **Kleine Farbflächen:** zusammenhängende Farbflächen unter `(Reglerwert in mm)²` werden in die häufigste Nachbarfarbe überführt; isolierte Flecken können transparent werden. Das garantiert keine Mindeststrichbreite. Nicht jeder Rest einer Fläche verschwindet durch einmalige Nachbarzuweisung.
@@ -55,32 +55,29 @@ Zum Ändern des Kennworts zuerst mit `sudo chown "$(id -u):$(id -g)" password.tx
    **Farbe lokalisieren:** Unter jedem Paletteneintrag „Lokalisieren“ wählen. Alle sichtbaren Pixel dieser Farbe werden im vorbereiteten Bild mit der frei wählbaren „Indikatorfarbe“ hervorgehoben. Das Tool wechselt dafür zur Ergebnisansicht und stellt nach „Markierung ausblenden“, einem erneuten Klick auf denselben Eintrag oder Esc die vorige Ansicht wieder her. Ein Wechsel der Ansicht oder der Bildregler beendet die Markierung. Die Markierung ist eine Anzeigehilfe und verändert weder Motivfarben noch Export. Auch nach Umfärben oder Zusammenfassen wird die aktuelle sichtbare Farbe markiert.
 8. **Farben bewusst zusammenfassen:** „Farben zusammenfassen“ aktivieren, zuerst die **Zielfarbe** anklicken, dann die Farbe, die sie übernehmen soll. Die erste Farbe bleibt exakt erhalten; die zweite verschwindet aus der Palette, ihre Pixelanteile werden addiert. Erneuter Klick auf die Zielfarbe hebt deren Auswahl auf. „Zusammenfassen abbrechen“ beendet den Modus ohne Änderung.
 9. „Rückgängig“ nimmt jeweils die letzte Farbänderung zurück. „Farbänderungen zurücksetzen“ entfernt alle manuellen Zuordnungen. Die Farbaktionen aktualisieren das Bild auch bei ausgeschalteter Live-Vorschau direkt. Während einer veralteten Vorschau ist die Palettenbearbeitung gesperrt.
-10. Vorlage als ZIP exportieren. Originale und exportierte Varianten bleiben auf dem Host gespeichert. Die letzten Projekte können erneut geöffnet werden; Reglereinstellungen und Farbzuordnungen können aus dem Export nachvollzogen werden, ein automatischer Einstellungsimport fehlt noch.
+10. **Bereich füllen:** Eine der aktuell verwendeten Bildfarben direkt beim Füllwerkzeug auswählen. „Weitere Farben“ öffnet die freie Farbauswahl. Dann „Bereich füllen“ aktivieren und auf die gewünschte Fläche in der Ergebnisansicht klicken. Nur die zusammenhängende Fläche gleicher Farbe wird ersetzt; diagonale Kontakte verbinden keine Bereiche. Auch transparente Innenräume lassen sich füllen. Der Mauszeiger wird zum Farbeimer. Eine Palettenfarbe anklicken übernimmt sie bei aktivem Füllwerkzeug ebenfalls als Füllfarbe. Rückgängig nimmt Füllungen und Palettenänderungen schrittweise zurück. „Füllungen zurücksetzen“ entfernt alle Füllungen. Zusätzliche Füllfarben dürfen die eingestellte Anzahl der Basisfarben überschreiten. Die Anzeige „Farben im Motiv“ zählt die tatsächlich verwendeten Farben. Der Regler für die Farbreduktion bleibt unverändert; Vorschau und PNG-Export behalten die neuen Farben. Rückgängig und Zurücksetzen berechnen die tatsächliche Farbanzahl erneut.
+11. Bild als einzelne PNG-Datei exportieren. Originale und exportierte Bilder bleiben auf dem Host gespeichert. Die letzten Projekte können erneut geöffnet werden; manuelle Änderungen und Reglereinstellungen werden beim Neuöffnen nicht automatisch wiederhergestellt.
 
-Bei manueller Farbbearbeitung wird die Basispalette fixiert, damit Vorschau und Export dieselben Farbzuordnungen verwenden. Änderungen an den Bildreglern, der Wechsel der Motivart, „Zurücksetzen“ berechnen die Palette neu und setzen manuelle Farbänderungen mit einem Hinweis zurück. Bei erneutem Öffnen eines Projekts werden die Farbzuordnungen nicht automatisch geladen. Mehrfachänderungen können innerhalb der aktuellen Bearbeitung schrittweise rückgängig gemacht werden.
+Bei manueller Farbbearbeitung wird die Basispalette fixiert, damit Vorschau und Export dieselben Farbzuordnungen verwenden. Änderungen an den Bildreglern, der Wechsel der Motivart, „Zurücksetzen“ berechnen die Palette neu und setzen manuelle Farbänderungen und Füllungen mit einem Hinweis zurück. Bei erneutem Öffnen eines Projekts werden die Farbzuordnungen nicht automatisch geladen. Mehrfachänderungen können innerhalb der aktuellen Bearbeitung schrittweise rückgängig gemacht werden.
 
 ### Export und Creator 9
 
-Das ZIP enthält:
-
-- `motiv-vorbereitet.png`: transparente Grafik, maximal 2.400 Pixel an der längsten Kante, ohne Hochskalieren kleiner Vorlagen. Eine DPI-Angabe beschreibt die Zielgröße.
-- `einstellungen.json`: Einstellungen, tatsächliche Palette und Zielgröße des Exports.
-- `creator-9-hinweise.txt`: Farbübersicht und kurzer Importablauf.
+Der Export enthält ausschließlich `stickatelier-motiv.png`: transparente Grafik, maximal 2.400 Pixel an der längsten Kante, ohne Hochskalieren kleiner Vorlagen. Die PNG-DPI beschreibt die Zielgröße; es gibt keine ZIP-Verpackung oder Begleitdateien.
 
 Creator: **Insert Artwork → Zielgröße ausdrücklich einstellen → Prepare Bitmap prüfen → Auto-Digitize oder Magic Wand → Stichplanung korrigieren → Probestick**. Transparente Bereiche nicht mitsticken. Das Tool erzeugt keine ART-/EXP-/PES-Stichdateien und kann Stoff, Garn, Dichte, Unterlagen und Zugausgleich nicht abschließend beurteilen. Pixelanteile sind kein Garnverbrauch.
 
-Die Vorschau wird bei maximal 1.200 Pixeln berechnet; beim Export mit bis zu 2.400 Pixeln erfolgt eine neue Berechnung. Sehr kleine Details und Flächenanteile können sich deshalb etwas unterscheiden. Ohne manuelle Farbänderungen kann sich auch die automatisch ermittelte Palette unterscheiden; bei aktiver Farbbearbeitung bleiben die Basispalette und ihre Zuordnungen fixiert. Die Exportübersicht enthält die tatsächlichen Exportwerte. Die Originaldatei wird nie durch Filter überschrieben, beim Speichern als PNG jedoch von Metadaten befreit.
+Vorschau und Export verwenden dieselbe Bildverarbeitung mit maximal 2.400 Pixeln. Dadurch stimmen Bereichsgrenzen und Füllfarben überein. Das Original bleibt unverändert; die PNG-Datei enthält die Ziel-DPI und keine Metadaten aus dem Original.
 
-## Serverupdate ohne KI-Werkstatt
+## Serverupdate
 
-Das Updatepaket `stickatelier-ohne-ki-update.zip` enthält die neue Anwendung und `deploy/update-without-ai.sh`. Die bestehende `compose.yaml` und die Kennwortdatei sind nicht im Paket enthalten. Dadurch bleiben die auf dem Server eingestellten Hostnamen (einschließlich der Cloudflare-Domain), Port 8080 und Cookie-Einstellungen erhalten.
+Das Updatepaket `stickatelier-fuellwerkzeug-update.zip` enthält die neue Anwendung und `deploy/update.sh`. Die bestehende `compose.yaml` und die Kennwortdatei sind nicht im Paket enthalten. Dadurch bleiben die auf dem Server eingestellten Hostnamen (einschließlich der Cloudflare-Domain), Port 8080 und Cookie-Einstellungen erhalten.
 
 Nach dem Upload des ZIPs in das Benutzerverzeichnis auf Ubuntu ausführen:
 
 ```bash
-unzip -o ~/stickatelier-ohne-ki-update.zip -d ~/stickatelier
+unzip -o ~/stickatelier-fuellwerkzeug-update.zip -d ~/stickatelier
 cd ~/stickatelier
-bash deploy/update-without-ai.sh
+bash deploy/update.sh
 ```
 
 Das Skript entfernt die bisherigen KI-Module und die ursprüngliche Portzuordnung für 1455. Vor einer Änderung der Compose-Datei legt es `compose.yaml.before-ai-removal` an. Es baut den Container neu und startet ihn mit dem bestehenden Datenvolume. Gespeicherte Motive und frühere Varianten bleiben nutzbar. Bereits vorhandene Verbindungsdateien im Datenvolume werden nicht gelöscht; die neue Anwendung liest sie nicht mehr.
@@ -118,9 +115,13 @@ Vor dem lokalen Serverstart ebenfalls `password.txt` mit der Kennworteingabe aus
 
 Node.js wird nur für die Tests der Pixelwerkzeuge und des Oberflächenstarts gebraucht; der Docker-Betrieb benötigt weiterhin ausschließlich Python.
 
+## Bildzoom
+
+Plus und Minus ändern die Ansicht zwischen 25 % und 800 %. „Zurücksetzen“ passt das Motiv wieder in die Bildansicht ein (100 %). Vergrößerte Motive lassen sich über die Scrollleisten oder das Touchpad verschieben. Original, Ergebnis, Vergleich und Farbmarkierungen werden gemeinsam vergrößert. Füllwerkzeug und Pipette beziehen ihre Bildposition aus der vergrößerten Ansicht. Beim Öffnen eines anderen Motivs wird der Zoom zurückgesetzt. Der Zoom verändert weder die Zielgröße noch die PNG-Datei.
+
 ## Prüfstand
 
-31 Python-Tests und fünf JavaScript-Tests bestanden. Geprüft sind Bildverarbeitung, Kennwortschutz, Upload, Vorschau, Export, der Oberflächenstart ohne KI-Aufrufe und das Beibehalten der Serverkonfiguration beim Update. Ehemalige KI-Routen liefern nach Anmeldung HTTP 404. Ein echter Docker-Build auf dem Ubuntu-Host, der Creator-Import und ein Probestick müssen mit euren Motiven geprüft werden.
+Beim vorherigen Stand bestanden 41 Python-Tests und fünf JavaScript-Tests. Die anschließenden Erweiterungen der Füllfarbauswahl und des Bildzooms wurden noch nicht getestet. Geprüft sind Bildverarbeitung, Kennwortschutz, Upload, Vorschau, PNG-Export und Bereichsfüllungen, der Oberflächenstart ohne KI-Aufrufe und das Beibehalten der Serverkonfiguration beim Update. Ehemalige KI-Routen liefern nach Anmeldung HTTP 404. Ein echter Docker-Build auf dem Ubuntu-Host, der Creator-Import und ein Probestick müssen mit euren Motiven geprüft werden.
 
 ## Lokaler Git-Export
 

@@ -11,7 +11,6 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
-import zipfile
 from unittest.mock import patch
 from PIL import Image, ImageDraw
 
@@ -59,11 +58,11 @@ class ServerTests(unittest.TestCase):
                 preview=json.load(self.post('/api/preview',request))
                 self.assertEqual(preview['stats']['width_mm'],width)
                 self.assertEqual(preview['stats']['height_mm'],width/2)
-                with zipfile.ZipFile(BytesIO(self.post('/api/export',request).read())) as package:
-                    exported=json.loads(package.read('einstellungen.json'))
-                    self.assertEqual(exported['width_mm'],width)
-                    image=Image.open(BytesIO(package.read('motiv-vorbereitet.png')))
-                    self.assertAlmostEqual(image.width/image.info['dpi'][0]*25.4,width,delta=0.2)
+                response=self.post('/api/export',request)
+                self.assertEqual(response.headers['Content-Type'],'image/png')
+                self.assertIn('.png',response.headers['Content-Disposition'])
+                image=Image.open(BytesIO(response.read()))
+                self.assertAlmostEqual(image.width/image.info['dpi'][0]*25.4,width,delta=0.2)
         for route in ('/api/preview','/api/export'):
             with self.subTest(route=route):
                 with self.assertRaises(urllib.error.HTTPError) as e:
@@ -76,11 +75,8 @@ class ServerTests(unittest.TestCase):
         request=dict(id=p['id'],settings=chosen)
         preview=json.load(self.post('/api/preview',request))
         self.assertEqual((preview['stats']['width_mm'],preview['stats']['height_mm']),(80,160))
-        with zipfile.ZipFile(BytesIO(self.post('/api/export',request).read())) as package:
-            exported=json.loads(package.read('einstellungen.json'))
-            self.assertEqual(exported['settings']['long_side_mm'],160)
-            im=Image.open(BytesIO(package.read('motiv-vorbereitet.png')))
-            self.assertAlmostEqual(im.height/im.info['dpi'][1]*25.4,160,delta=0.2)
+        im=Image.open(BytesIO(self.post('/api/export',request).read()))
+        self.assertAlmostEqual(im.height/im.info['dpi'][1]*25.4,160,delta=0.2)
         for route in ('/api/preview','/api/export'):
             with self.subTest(route=route):
                 with self.assertRaises(urllib.error.HTTPError) as e:
@@ -125,9 +121,8 @@ class ServerTests(unittest.TestCase):
         chosen=dict(colors=2,width_mm=80,palette_edit=dict(base=['#ffffff','#ff0000'],map={'#ff0000':'#0000ff'}))
         request=dict(id=p['id'],settings=chosen)
         json.load(self.post('/api/preview',request))
-        with zipfile.ZipFile(BytesIO(self.post('/api/export',request).read())) as package:
-            image=Image.open(BytesIO(package.read('motiv-vorbereitet.png')))
-            self.assertEqual(image.getpixel((120,40)),(0,0,255,255))
+        image=Image.open(BytesIO(self.post('/api/export',request).read()))
+        self.assertEqual(image.getpixel((120,40)),(0,0,255,255))
         self.assertEqual(self.client.open(self.base+'/api/original?id='+p['id']).read(),before)
 
     def test_cross_origin_and_invalid_project_rejected(self):
@@ -137,5 +132,31 @@ class ServerTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as error:
             self.post('/api/preview',dict(id='../private',settings={}))
         self.assertEqual(error.exception.code,400)
+
+    def test_short_side_over_frame_limit_remains_previewable_and_exportable(self):
+        p=json.load(self.post('/api/upload',png(Image.new('RGBA',(100,200),'red'))))
+        request=dict(id=p['id'],settings=dict(short_side_mm=180))
+        preview=json.load(self.post('/api/preview',request))
+        self.assertEqual((preview['stats']['width_mm'],preview['stats']['height_mm']),(180,360))
+        self.assertTrue(preview['stats']['frame_exceeded'])
+        exported=Image.open(BytesIO(self.post('/api/export',request).read()))
+        self.assertAlmostEqual(exported.width/exported.info['dpi'][0]*25.4,180,delta=.2)
+
+    def test_fill_preview_equals_png_export_at_large_resolution(self):
+        original=Image.new('RGBA',(2500,1300),'white')
+        draw=ImageDraw.Draw(original)
+        draw.rectangle((200,200,600,1000),fill='red')
+        draw.rectangle((1800,200,2200,1000),fill='red')
+        p=json.load(self.post('/api/upload',png(original)))
+        request=dict(id=p['id'],settings=dict(colors=4,long_side_mm=160,
+            fill_edits=[dict(x=.16,y=.5,color='#0000ff')]))
+        preview=json.load(self.post('/api/preview',request))
+        shown=Image.open(BytesIO(base64.b64decode(preview['image'].split(',')[1])))
+        exported=Image.open(BytesIO(self.post('/api/export',request).read()))
+        self.assertEqual(shown.size,exported.size)
+        self.assertEqual(shown.tobytes(),exported.tobytes())
+        self.assertEqual(exported.getpixel((384,600)),(0,0,255,255))
+        self.assertEqual(exported.getpixel((1920,600)),(255,0,0,255))
+        self.assertEqual([f.suffix for f in self.module.project(p['id']).glob('export-*')],['.png'])
 
 if __name__=='__main__':unittest.main()

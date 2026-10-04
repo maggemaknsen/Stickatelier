@@ -1,6 +1,5 @@
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from http.cookies import SimpleCookie
-from io import BytesIO
 from pathlib import Path
 import base64
 import hashlib
@@ -10,7 +9,6 @@ import re
 import threading
 import urllib.parse
 import uuid
-import zipfile
 from PIL import Image
 from processing import decode, prepare, png, demo, settings
 from auth import PasswordAuth
@@ -104,9 +102,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(dict(error='Bitte im Stickatelier anmelden.'),status=401)
             if url.path == '/login':
                 return self.send('',status=303,extra={'Location':'/'})
-            if url.path in ('/','/app.js','/color-tools.js'):
+            if url.path in ('/','/app.js','/color-tools.js','/fill-cursor.svg'):
                 name = 'index.html' if url.path == '/' else url.path[1:]
-                mime = {'index.html':'text/html; charset=utf-8','app.js':'text/javascript; charset=utf-8','color-tools.js':'text/javascript; charset=utf-8','style.css':'text/css; charset=utf-8','favicon.svg':'image/svg+xml'}[name]
+                mime = {'index.html':'text/html; charset=utf-8','app.js':'text/javascript; charset=utf-8','color-tools.js':'text/javascript; charset=utf-8','style.css':'text/css; charset=utf-8','favicon.svg':'image/svg+xml','fill-cursor.svg':'image/svg+xml'}[name]
                 extra = {}
                 return self.send((ROOT/'static'/name).read_bytes(),mime,extra=extra)
             if url.path == '/api/projects':
@@ -165,29 +163,13 @@ class Handler(BaseHTTPRequestHandler):
                 s = settings(body.get('settings',{}))
                 with WORKERS:
                     with Image.open(directory/'original.png') as original:
-                        image, stats = prepare(original,s,max_edge=1200 if route == '/api/preview' else 2400)
+                        image, stats = prepare(original,s,max_edge=2400)
                     if route == '/api/preview':
                         return self.send(dict(image='data:image/png;base64,'+base64.b64encode(png(image)).decode(),stats=stats))
                     output = png(image,stats['width_mm'])
-                    bio = BytesIO()
-                    with zipfile.ZipFile(bio,'w',zipfile.ZIP_DEFLATED) as package:
-                        package.writestr('motiv-vorbereitet.png',output)
-                        package.writestr('einstellungen.json',json.dumps(stats,ensure_ascii=False,indent=2))
-                        palette = '\n'.join(f"{i+1}. {c['hex']} – {c['share']} %" for i,c in enumerate(stats['palette']))
-                        instructions = (f"STICKATELIER – VORLAGE FÜR CREATOR 9\n\nZielgröße: {stats['width_mm']} × {stats['height_mm']} mm\n"
-                            f"Farben: {stats['colors']}\n\n{palette}\n\nPNG in Creator 9 über Insert Artwork importieren. "
-                            'Die oben genannte Größe in Creator ausdrücklich einstellen; die DPI-Angabe ist nur eine Hilfe. '
-                            'Prepare Bitmap prüfen, dann Auto-Digitize oder Magic Wand verwenden. '
-                            'Transparente Bereiche nicht als Stickfläche übernehmen. '
-                            'Unterlagen, Stichdichte, Stichrichtung, Reihenfolge und Zugausgleich prüfen. '
-                            'Als bearbeitbares Creator-Projekt speichern und erst danach das Maschinenformat exportieren. '
-                            'Ein Probestick auf vergleichbarem Material bleibt erforderlich.\n\n'
-                            'Diese Datei ist eine Grafikvorlage, keine Stickdatei. Farbanteile sind Pixelanteile, kein Garnverbrauch.\n')
-                        package.writestr('creator-9-hinweise.txt',instructions)
-                    # Persist this exported variant, without ever overwriting the source.
                     digest = hashlib.sha256(json.dumps(s,sort_keys=True).encode()).hexdigest()[:16]
-                    (directory/f'export-{digest}.zip').write_bytes(bio.getvalue())
-                    return self.send(bio.getvalue(),'application/zip',extra={'Content-Disposition':'attachment; filename="stickatelier-creator9.zip"'})
+                    (directory/f'export-{digest}.png').write_bytes(output)
+                    return self.send(output,'image/png',extra={'Content-Disposition':'attachment; filename="stickatelier-motiv.png"'})
             return self.send(dict(error='Nicht gefunden.'),status=404)
         except (ValueError,TypeError,KeyError) as exc:
             self.send(dict(error=str(exc) if isinstance(exc,ValueError) else 'Ungültige Anfrage.'),status=400)

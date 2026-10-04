@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class UpdateTests(unittest.TestCase):
     def test_update_preserves_hosts_password_and_projects_and_is_repeatable(self):
-        script = (ROOT/'deploy/update-without-ai.sh').read_text(encoding='utf-8')
+        script = (ROOT/'deploy/update.sh').read_text(encoding='utf-8')
         migration = script.split("python3 - <<'PY'\n", 1)[1].split('\nPY\n', 1)[0]
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
