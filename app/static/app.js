@@ -16,6 +16,7 @@ let painting=false, stroke=null;
 let pickingBackground=false, locatedColor=null, locatePreviousView=null;
 const zoomSteps=[.25,.5,.75,1,1.25,1.5,2,3,4,6,8];
 let zoom=1;
+let zoomLayoutKey='';
 let creatorConfig={path:'',ready:false};
 try{const saved=JSON.parse(localStorage.getItem('stickatelier.creator')||'{}');if(typeof saved.path==='string')creatorConfig={path:saved.path,ready:saved.ready===true};}catch{}
 function values(){const s={};for(const key of keys)s[key]=key==='remove_bg'?$(key).checked:['background','color_space'].includes(key)?$(key).value:Number($(key).value);s.palette_edit=paletteEdit;s.fill_edits=fillEdits;return s;}
@@ -140,21 +141,32 @@ function applyZoom(reset=false){
  const viewport=$('canvas'),surface=$('zoomSurface'),image=$('processed');
  $('zoomLevel').value=Math.round(zoom*100)+' %';
  if(!current||viewport.hidden||!image.naturalWidth||!viewport.clientWidth||!viewport.clientHeight)return;
- const w=viewport.clientWidth,h=viewport.clientHeight;
- const centerX=((viewport.scrollLeft||0)+w/2)/(surface.offsetWidth||w),centerY=((viewport.scrollTop||0)+h/2)/(surface.offsetHeight||h);
+ // Measure the allocated box, not clientWidth/clientHeight, which change
+ // when our own zoom surface adds or removes a scrollbar.
+ const box=typeof getComputedStyle==='function'?getComputedStyle(viewport):null;
+ const w=Math.max(1,Math.floor(parseFloat(box?.width)||viewport.clientWidth));
+ const h=Math.max(1,Math.floor(parseFloat(box?.height)||viewport.clientHeight));
+ const key=[w,h,image.naturalWidth,image.naturalHeight,zoom].join(':');
+ if(key===zoomLayoutKey&&!reset)return;
+ const centerX=((viewport.scrollLeft||0)+viewport.clientWidth/2)/(surface.offsetWidth||w),centerY=((viewport.scrollTop||0)+viewport.clientHeight/2)/(surface.offsetHeight||h);
+ // At fit-to-window size, fractional CSS pixels must never create scrollbars.
+ viewport.style.overflow=zoom>1?'auto':'hidden';
  const fit=Math.min(Math.max(1,w-40)/image.naturalWidth,Math.max(1,h-40)/image.naturalHeight,1);
- const imageWidth=image.naturalWidth*fit*zoom,imageHeight=image.naturalHeight*fit*zoom;
+ const imageWidth=Math.floor(image.naturalWidth*fit*zoom*64)/64,imageHeight=Math.floor(image.naturalHeight*fit*zoom*64)/64;
  const surfaceWidth=Math.max(w,imageWidth+40),surfaceHeight=Math.max(h,imageHeight+40);
  surface.style.width=surfaceWidth+'px';surface.style.height=surfaceHeight+'px';
  $('imageStack').style.width=imageWidth+'px';$('imageStack').style.height=imageHeight+'px';
- viewport.scrollLeft=(reset?0.5:centerX)*surfaceWidth-w/2;
- viewport.scrollTop=(reset?0.5:centerY)*surfaceHeight-h/2;
+ viewport.scrollLeft=(reset?0.5:centerX)*surfaceWidth-viewport.clientWidth/2;
+ viewport.scrollTop=(reset?0.5:centerY)*surfaceHeight-viewport.clientHeight/2;
+ zoomLayoutKey=key;
 }
 function setZoom(value,reset=false){zoom=Math.max(zoomSteps[0],Math.min(zoomSteps[zoomSteps.length-1],value));applyZoom(reset);buttons();}
 $('zoomIn').onclick=()=>setZoom(zoomSteps.find(step=>step>zoom)||zoom);
 $('zoomOut').onclick=()=>setZoom([...zoomSteps].reverse().find(step=>step<zoom)||zoom);
 $('zoomReset').onclick=()=>setZoom(1,true);
-if(typeof ResizeObserver!=='undefined')new ResizeObserver(()=>applyZoom()).observe($('canvas'));
+// The stage is independent of its child's scrollbars, so observing it cannot
+// feed a zoom layout change straight back into another resize notification.
+if(typeof ResizeObserver!=='undefined')new ResizeObserver(()=>applyZoom()).observe($('stage'));
 else if(typeof window!=='undefined')window.addEventListener('resize',()=>applyZoom());
 function applyView(){
  clearFillHover();
@@ -400,6 +412,7 @@ function stats(s){
  $('notices').replaceChildren();for(const notice of s.notices){const p=document.createElement('p');p.textContent=notice;$('notices').append(p);}
 }
 function openProject(p){
+ zoomLayoutKey='';
  resetMouseInfo();hoverPixels=null;hoverGeneration++;
  previewPixels=null;
  clearFills();stopPicking();clearLocalization();

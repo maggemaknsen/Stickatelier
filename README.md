@@ -141,6 +141,14 @@ Eine vorhandene Bildfarbe oder unter „Weitere Farben“ eine neue Korrekturfar
 
 „Rückgängig“ im Werkzeugbereich oder in der Farbpalette nimmt jeweils die letzte Farbänderung, Füllung oder den letzten Pinselstrich zurück. Pinselstriche und Füllungen können getrennt zurückgesetzt werden. Beide werden in ihrer Reihenfolge auf Vorschau und PNG-Export angewendet. Bildregler und Methodenwechsel setzen alle manuellen Korrekturen zurück. Esc beendet den Pinsel und verwirft einen noch nicht abgeschlossenen Strich. Maximal 100 Füllungen und Striche mit insgesamt 20.000 Pinselpunkten (maximal 2.000 pro Strich).
 
+## Stabile Bildansicht bei Laptop-Skalierung
+
+Eine Rückkopplung zwischen Zoom-Fläche, Scrollbalken und ResizeObserver konnte bei 90 % Seitenskalierung und zwei Farben mit einem lokalen Testmotiv nachgestellt werden: 89 erneute Zoom-Berechnungen in 90 gemessenen Bildern und zwei abwechselnde Bildgrößen. Die Farbreduktion selbst änderte dabei nicht die Motivgröße.
+
+Die Größenberechnung verwendet jetzt die zugewiesene Fläche unabhängig von Scrollbalken. Der Größenbeobachter überwacht die äußere Bildbühne; bei unveränderten Abmessungen wird das Layout nicht erneut geschrieben und die Scrollposition bleibt erhalten. In der eingepassten Ansicht verhindern abgerundete Maße und deaktivierte Scrollbalken die Rückkopplung. Vergrößerte Ansichten bleiben scrollbar.
+
+Gezielt geprüft mit einem separaten lokalen Edge-Browser, 1365 × 768 Pixeln, Geräteskalierung 1,25 und 1/2/7 Farben bei jeweils 80/90/100/110 % CSS-Seitenskalierung: alle zwölf Fälle stabil, keine JavaScript-Fehler. Zusätzlich vier Regressionstests in tests/test_zoom.cjs bestanden. Dies ersetzt keinen vollständigen Test aller Funktionen oder eine Prüfung auf Stephies Laptop.
+
 ## Bildzoom
 
 Plus und Minus ändern die Ansicht zwischen 25 % und 800 %. „Zurücksetzen“ passt das Motiv wieder in die Bildansicht ein (100 %). Vergrößerte Motive lassen sich über die Scrollleisten oder das Touchpad verschieben. Original, Ergebnis, Vergleich und Farbmarkierungen werden gemeinsam vergrößert. Füllwerkzeug und Pipette beziehen ihre Bildposition aus der vergrößerten Ansicht. Beim Öffnen eines anderen Motivs wird der Zoom zurückgesetzt. Der Zoom verändert weder die Zielgröße noch die PNG-Datei.
